@@ -6,12 +6,12 @@ _G.boomshaka = true
 
 local ScriptEnabled = true
 
-local UserInputService    = game:GetService("UserInputService")
-local VirtualInputManager = game:GetService("VirtualInputManager")
-local Players             = game:GetService("Players")
-local RunService          = game:GetService("RunService")
-local LocalPlayer         = Players.LocalPlayer
-local Camera              = workspace.CurrentCamera
+local UserInputService = game:GetService("UserInputService")
+local Players          = game:GetService("Players")
+local RunService       = game:GetService("RunService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local LocalPlayer      = Players.LocalPlayer
+local Camera           = workspace.CurrentCamera
 
 local AnimationTriggers = {
     ["rbxassetid://100962226150441"] = 0.19,
@@ -38,6 +38,21 @@ local pingVisualizerEnabled = false
 local ghostModel            = nil
 local positionHistory       = {}
 local MAX_HISTORY           = 300
+
+local function fireActivated()
+    if not ScriptEnabled then return end
+    local char = LocalPlayer.Character
+    if not char then return end
+    local moveset = char:FindFirstChild("Moveset")
+    if not moveset then warn("[boomshaka] Moveset not found") return end
+    local move = moveset:FindFirstChild("Divergent Fist")
+    if not move then warn("[boomshaka] Divergent Fist not found in Moveset") return end
+    local ok, re = pcall(function()
+        return ReplicatedStorage.Knit.Knit.Services.DivergentFistService.RE.Activated
+    end)
+    if not ok or not re then warn("[boomshaka] RemoteEvent path not found") return end
+    re:FireServer(move)
+end
 
 local function setGhostColor(color)
     GhostColor = color
@@ -852,12 +867,6 @@ local function getHRP(character)
     )
 end
 
-local function pressKey(keyCode)
-    if not ScriptEnabled then return end
-    VirtualInputManager:SendKeyEvent(true,  keyCode, false, game)
-    VirtualInputManager:SendKeyEvent(false, keyCode, false, game)
-end
-
 local function getNearestPlayer(maxRange)
     local myHRP = getHRP(LocalPlayer.Character)
     if not myHRP then return nil end
@@ -997,7 +1006,7 @@ end
 
 dashBtn.MouseButton1Click:Connect(function()
     if not ScriptEnabled then return end
-    pressKey(Enum.KeyCode.Three)
+    fireActivated()
     task.wait(0.2)
     startCurveGlide()
 end)
@@ -1014,7 +1023,7 @@ local function setupCharacter(character)
         if delayTime then
             task.delay(delayTime, function()
                 if humanoid.Health > 0 and ScriptEnabled then
-                    pressKey(Enum.KeyCode.Three)
+                    fireActivated()
                 end
             end)
         end
@@ -1043,7 +1052,7 @@ end)
 UserInputService.InputBegan:Connect(function(input, processed)
     if processed then return end
     if ScriptEnabled and input.KeyCode == Enum.KeyCode.E then
-        pressKey(Enum.KeyCode.Three)
+        fireActivated()
         task.wait(0.2)
         startCurveGlide()
     end
