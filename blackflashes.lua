@@ -2,6 +2,10 @@ if _G.boomshaka then
     warn("Script already running!")
     return
 end
+setclipboard("https://discord.gg/wNkmb2HB69")
+local NotificationLibrary = loadstring(game:HttpGet("https://raw.githubusercontent.com/IceMinisterq/Notification-Library/Main/Library.lua"))()
+NotificationLibrary:SendNotification("Info", "Discord copied to clipboard, if script doesn't execute please report in discord", 5)
+
 _G.boomshaka = true
 
 local ScriptEnabled = true
