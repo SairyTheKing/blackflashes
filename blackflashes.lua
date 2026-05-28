@@ -5,11 +5,14 @@ end
 _G.boomshaka = true
 
 local ScriptEnabled = true
+local glideInProgress = false
 
 local UserInputService = game:GetService("UserInputService")
 local Players          = game:GetService("Players")
 local RunService       = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local HttpService      = game:GetService("HttpService")
+local TweenService     = game:GetService("TweenService")
 local LocalPlayer      = Players.LocalPlayer
 local Camera           = workspace.CurrentCamera
 
@@ -24,13 +27,18 @@ local StraightAnimations = {
     ["rbxassetid://123171106092050"] = true,
 }
 
-local Settings = {
+local DefaultSettings = {
     Duration      = 0.25,
     Radius        = 3,
     Range         = 25,
     CurveStrength = 14,
     CamOffset     = 4,
 }
+
+local Settings = {}
+for k, v in pairs(DefaultSettings) do
+    Settings[k] = v
+end
 
 local GhostColor = Color3.fromRGB(255, 80, 80)
 
@@ -39,18 +47,70 @@ local ghostModel            = nil
 local positionHistory       = {}
 local MAX_HISTORY           = 300
 
+local CONFIG_FOLDER = "Boomshaka_Configs"
+local CONFIG_FILE = CONFIG_FOLDER .. "/config.json"
+
+local function loadConfig()
+    local success, result = pcall(function()
+        if not isfolder(CONFIG_FOLDER) then
+            makefolder(CONFIG_FOLDER)
+        end
+        if isfile(CONFIG_FILE) then
+            return HttpService:JSONDecode(readfile(CONFIG_FILE))
+        end
+        return nil
+    end)
+    if success and result then
+        for k, v in pairs(result) do
+            if k == "Duration" or k == "Radius" or k == "Range" or k == "CurveStrength" or k == "CamOffset" then
+                if typeof(v) == "number" then
+                    Settings[k] = v
+                end
+            end
+            if k == "GhostColor" and typeof(v) == "table" then
+                GhostColor = Color3.new(v.R, v.G, v.B)
+            end
+            if k == "PingVisualizer" and typeof(v) == "boolean" then
+                pingVisualizerEnabled = v
+            end
+            if k == "DashButtonLocked" and typeof(v) == "boolean" then
+                mobileBtnLocked = v
+            end
+        end
+    end
+end
+
+local function saveConfig()
+    pcall(function()
+        if not isfolder(CONFIG_FOLDER) then
+            makefolder(CONFIG_FOLDER)
+        end
+        local data = {
+            Duration = Settings.Duration,
+            Radius = Settings.Radius,
+            Range = Settings.Range,
+            CurveStrength = Settings.CurveStrength,
+            CamOffset = Settings.CamOffset,
+            GhostColor = {R = GhostColor.R, G = GhostColor.G, B = GhostColor.B},
+            PingVisualizer = pingVisualizerEnabled,
+            DashButtonLocked = mobileBtnLocked,
+        }
+        writefile(CONFIG_FILE, HttpService:JSONEncode(data))
+    end)
+end
+
 local function fireActivated()
     if not ScriptEnabled then return end
     local char = LocalPlayer.Character
     if not char then return end
     local moveset = char:FindFirstChild("Moveset")
-    if not moveset then warn("[boomshaka] Moveset not found") return end
+    if not moveset then return end
     local move = moveset:FindFirstChild("Divergent Fist")
-    if not move then warn("[boomshaka] Divergent Fist not found in Moveset") return end
+    if not move then return end
     local ok, re = pcall(function()
         return ReplicatedStorage.Knit.Knit.Services.DivergentFistService.RE.Activated
     end)
-    if not ok or not re then warn("[boomshaka] RemoteEvent path not found") return end
+    if not ok or not re then return end
     re:FireServer(move)
 end
 
@@ -63,6 +123,7 @@ local function setGhostColor(color)
             end
         end
     end
+    saveConfig()
 end
 
 local function createGhost(character)
@@ -129,6 +190,73 @@ screenGui.Name           = "BoomshakaPC"
 screenGui.ResetOnSpawn   = false
 screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 screenGui.Parent         = LocalPlayer.PlayerGui
+
+local notifGui = Instance.new("ScreenGui")
+notifGui.Name = "BoomshakaNotif"
+notifGui.ResetOnSpawn = false
+notifGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+notifGui.Parent = LocalPlayer.PlayerGui
+
+local function showNotification()
+    local notifFrame = Instance.new("Frame")
+    notifFrame.Size = UDim2.new(0, 340, 0, 72)
+    notifFrame.Position = UDim2.new(0.5, -170, 0, -100)
+    notifFrame.BackgroundColor3 = Color3.fromRGB(14, 14, 14)
+    notifFrame.BorderSizePixel = 0
+    notifFrame.Parent = notifGui
+    Instance.new("UICorner", notifFrame).CornerRadius = UDim.new(0, 14)
+    local notifStroke = Instance.new("UIStroke", notifFrame)
+    notifStroke.Color = Color3.fromRGB(80, 180, 255)
+    notifStroke.Thickness = 1.5
+
+    local icon = Instance.new("TextLabel")
+    icon.Size = UDim2.new(0, 44, 0, 44)
+    icon.Position = UDim2.new(0, 14, 0.5, -22)
+    icon.BackgroundTransparency = 1
+    icon.Text = "⚡"
+    icon.TextColor3 = Color3.fromRGB(80, 180, 255)
+    icon.TextSize = 28
+    icon.Font = Enum.Font.GothamBold
+    icon.Parent = notifFrame
+
+    local title = Instance.new("TextLabel")
+    title.Size = UDim2.new(1, -72, 0, 24)
+    title.Position = UDim2.new(0, 60, 0, 12)
+    title.BackgroundTransparency = 1
+    title.Text = "Boomshaka Loaded"
+    title.TextColor3 = Color3.fromRGB(255, 255, 255)
+    title.TextSize = 16
+    title.Font = Enum.Font.GothamBold
+    title.TextXAlignment = Enum.TextXAlignment.Left
+    title.Parent = notifFrame
+
+    local body = Instance.new("TextLabel")
+    body.Size = UDim2.new(1, -72, 0, 18)
+    body.Position = UDim2.new(0, 60, 0, 38)
+    body.BackgroundTransparency = 1
+    body.Text = "Press E to start Black Flashing"
+    body.TextColor3 = Color3.fromRGB(160, 160, 160)
+    body.TextSize = 13
+    body.Font = Enum.Font.Gotham
+    body.TextXAlignment = Enum.TextXAlignment.Left
+    body.Parent = notifFrame
+
+    TweenService:Create(notifFrame, TweenInfo.new(0.6, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {
+        Position = UDim2.new(0.5, -170, 0, 28)
+    }):Play()
+
+    task.delay(4.5, function()
+        local tween = TweenService:Create(notifFrame, TweenInfo.new(0.5, Enum.EasingStyle.Quart, Enum.EasingDirection.In), {
+            Position = UDim2.new(0.5, -170, 0, -100)
+        })
+        tween:Play()
+        tween.Completed:Connect(function()
+            notifFrame:Destroy()
+        end)
+    end)
+end
+
+showNotification()
 
 local BTN_SIZE          = 62
 local mobileBtnLocked   = false
@@ -254,7 +382,7 @@ local tutorialPages = {
     {
         icon  = "⚙",
         title = "Settings",
-        body  = "RightShift opens/closes this panel.\n\nGlide Speed — dash travel time\nLanding Distance — studs behind target\nDetection Range — enemy scan distance\nCurve Width — arc width\nCamera Height — cam offset during dash",
+        body  = "RightShift opens/closes this panel.\n\nGlide Duration — how long the dash takes\nStop Distance — studs behind the target you land\nTarget Range — how far enemies are detected\nArc Width — how wide the curve swings\nCam Lift — camera height during the dash",
     },
     {
         icon  = "✦",
@@ -443,8 +571,8 @@ end)
 renderTutPage()
 
 local frame = Instance.new("Frame")
-frame.Size             = UDim2.new(0, 320, 0, 740)
-frame.Position         = UDim2.new(0, 20, 0.5, -370)
+frame.Size             = UDim2.new(0, 320, 0, 820)
+frame.Position         = UDim2.new(0, 20, 0.5, -410)
 frame.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
 frame.BorderSizePixel  = 0
 frame.Active           = true
@@ -518,6 +646,8 @@ local layout = Instance.new("UIListLayout", container)
 layout.Padding   = UDim.new(0, 8)
 layout.SortOrder = Enum.SortOrder.LayoutOrder
 Instance.new("UIPadding", container).PaddingBottom = UDim.new(0, 8)
+
+local sliderRefs = {}
 
 local function makeSlider(labelText, description, min, max, default, settingKey, step)
     step = step or 0.01
@@ -594,6 +724,7 @@ local function makeSlider(labelText, description, min, max, default, settingKey,
         knob.Position        = UDim2.new(alpha, -8, 0.5, -8)
         valLbl.Text          = tostring(display)
         Settings[settingKey] = snapped
+        saveConfig()
     end
 
     local dragging = false
@@ -616,13 +747,15 @@ local function makeSlider(labelText, description, min, max, default, settingKey,
             update(i.Position.X)
         end
     end)
+
+    sliderRefs[settingKey] = {fill = fill, knob = knob, track = track, valLbl = valLbl, min = min, max = max}
 end
 
-makeSlider("Glide Speed",      "Lower = faster. (0.1 is instant, 1.0 is slow)", 0.1, 1.0, Settings.Duration,      "Duration",      0.025)
-makeSlider("Landing Distance", "How many studs behind the target you land",      1,   10,  Settings.Radius,        "Radius",        0.5)
-makeSlider("Detection Range",  "How far away a target can be detected (studs)",  10,  50,  Settings.Range,         "Range",         1)
-makeSlider("Curve Width",      "How wide the arc swings around the target",      0,   30,  Settings.CurveStrength, "CurveStrength", 1)
-makeSlider("Camera Height",    "How high the lock-on camera floats above you",   0,   10,  Settings.CamOffset,     "CamOffset",     0.5)
+makeSlider("Glide Duration",  "How long the dash takes in seconds. Lower = faster", 0.1, 1.0, Settings.Duration,      "Duration",      0.025)
+makeSlider("Stop Distance",   "Studs behind the target where you stop",              1,   10,  Settings.Radius,        "Radius",        0.5)
+makeSlider("Target Range",    "Max distance to detect enemies (studs)",              10,  50,  Settings.Range,         "Range",         1)
+makeSlider("Arc Width",       "Curve arc size. 0 = straight dash, 30 = wide arc",   0,   30,  Settings.CurveStrength, "CurveStrength", 1)
+makeSlider("Cam Lift",        "How high the camera rises above you during the dash", 0,   10,  Settings.CamOffset,     "CamOffset",     0.5)
 
 local pingDivider = Instance.new("Frame")
 pingDivider.Size             = UDim2.new(1, 0, 0, 1)
@@ -806,6 +939,160 @@ local tutBtnStroke = Instance.new("UIStroke", tutBtn)
 tutBtnStroke.Color     = Color3.fromRGB(58, 58, 58)
 tutBtnStroke.Thickness = 1
 
+local configRow = Instance.new("Frame")
+configRow.Size             = UDim2.new(1, 0, 0, 44)
+configRow.BackgroundColor3 = Color3.fromRGB(22, 22, 22)
+configRow.BorderSizePixel  = 0
+configRow.Parent           = container
+Instance.new("UICorner", configRow).CornerRadius = UDim.new(0, 10)
+
+local configLabel = Instance.new("TextLabel")
+configLabel.Size                   = UDim2.new(0, 100, 1, 0)
+configLabel.Position               = UDim2.new(0, 12, 0, 0)
+configLabel.BackgroundTransparency = 1
+configLabel.Text                   = "Config"
+configLabel.TextColor3             = Color3.fromRGB(200, 200, 200)
+configLabel.TextSize               = 13
+configLabel.Font                   = Enum.Font.GothamBold
+configLabel.TextXAlignment         = Enum.TextXAlignment.Left
+configLabel.Parent                 = configRow
+
+local saveConfigBtn = Instance.new("TextButton")
+saveConfigBtn.Size             = UDim2.new(0, 55, 0, 28)
+saveConfigBtn.Position         = UDim2.new(0, 120, 0.5, -14)
+saveConfigBtn.BackgroundColor3 = Color3.fromRGB(0, 148, 75)
+saveConfigBtn.Text             = "💾 Save"
+saveConfigBtn.TextColor3       = Color3.fromRGB(255, 255, 255)
+saveConfigBtn.TextSize         = 11
+saveConfigBtn.Font             = Enum.Font.GothamBold
+saveConfigBtn.BorderSizePixel  = 0
+saveConfigBtn.Parent           = configRow
+Instance.new("UICorner", saveConfigBtn).CornerRadius = UDim.new(0, 8)
+
+local loadConfigBtn = Instance.new("TextButton")
+loadConfigBtn.Size             = UDim2.new(0, 55, 0, 28)
+loadConfigBtn.Position         = UDim2.new(0, 181, 0.5, -14)
+loadConfigBtn.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+loadConfigBtn.Text             = "↺ Load"
+loadConfigBtn.TextColor3       = Color3.fromRGB(180, 180, 180)
+loadConfigBtn.TextSize         = 11
+loadConfigBtn.Font             = Enum.Font.GothamBold
+loadConfigBtn.BorderSizePixel  = 0
+loadConfigBtn.Parent           = configRow
+Instance.new("UICorner", loadConfigBtn).CornerRadius = UDim.new(0, 8)
+
+local resetConfigBtn = Instance.new("TextButton")
+resetConfigBtn.Size             = UDim2.new(0, 55, 0, 28)
+resetConfigBtn.Position         = UDim2.new(0, 242, 0.5, -14)
+resetConfigBtn.BackgroundColor3 = Color3.fromRGB(190, 50, 50)
+resetConfigBtn.Text             = "↺ Reset"
+resetConfigBtn.TextColor3       = Color3.fromRGB(255, 255, 255)
+resetConfigBtn.TextSize         = 11
+resetConfigBtn.Font             = Enum.Font.GothamBold
+resetConfigBtn.BorderSizePixel  = 0
+resetConfigBtn.Parent           = configRow
+Instance.new("UICorner", resetConfigBtn).CornerRadius = UDim.new(0, 8)
+
+local function updateSlidersFromSettings()
+    for key, ref in pairs(sliderRefs) do
+        local val = Settings[key]
+        if val then
+            local alpha = (val - ref.min) / (ref.max - ref.min)
+            ref.fill.Size = UDim2.new(alpha, 0, 1, 0)
+            ref.knob.Position = UDim2.new(alpha, -8, 0.5, -8)
+            ref.valLbl.Text = tostring(math.floor(val * 1000 + 0.5) / 1000)
+        end
+    end
+end
+
+saveConfigBtn.MouseButton1Click:Connect(function()
+    saveConfig()
+    saveConfigBtn.Text = "✓ Saved"
+    saveConfigBtn.BackgroundColor3 = Color3.fromRGB(0, 180, 90)
+    task.delay(1.5, function()
+        saveConfigBtn.Text = "💾 Save"
+        saveConfigBtn.BackgroundColor3 = Color3.fromRGB(0, 148, 75)
+    end)
+end)
+
+loadConfigBtn.MouseButton1Click:Connect(function()
+    loadConfig()
+    updateSlidersFromSettings()
+    if pingVisualizerEnabled then
+        pingToggle.Text = "ON"
+        pingToggle.TextColor3 = Color3.fromRGB(255, 255, 255)
+        pingToggle.BackgroundColor3 = Color3.fromRGB(0, 180, 90)
+        createGhost(LocalPlayer.Character)
+    else
+        pingToggle.Text = "OFF"
+        pingToggle.TextColor3 = Color3.fromRGB(180, 180, 180)
+        pingToggle.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+        destroyGhost()
+    end
+    updateLockVisual()
+    if mobileBtnLocked then
+        lockBtn.Text = "🔒 Locked"
+        lockBtn.TextColor3 = Color3.fromRGB(255, 200, 50)
+        lockBtn.BackgroundColor3 = Color3.fromRGB(60, 50, 20)
+    else
+        lockBtn.Text = "🔓 Unlocked"
+        lockBtn.TextColor3 = Color3.fromRGB(180, 180, 180)
+        lockBtn.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+    end
+    loadConfigBtn.Text = "✓ Loaded"
+    loadConfigBtn.BackgroundColor3 = Color3.fromRGB(0, 148, 75)
+    loadConfigBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    task.delay(1.5, function()
+        loadConfigBtn.Text = "↺ Load"
+        loadConfigBtn.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+        loadConfigBtn.TextColor3 = Color3.fromRGB(180, 180, 180)
+    end)
+end)
+
+resetConfigBtn.MouseButton1Click:Connect(function()
+    Settings.Duration = 0.25
+    Settings.Radius = 3
+    Settings.Range = 25
+    Settings.CurveStrength = 14
+    Settings.CamOffset = 4
+    GhostColor = Color3.fromRGB(255, 80, 80)
+    pingVisualizerEnabled = false
+    mobileBtnLocked = false
+    updateSlidersFromSettings()
+    destroyGhost()
+    pingToggle.Text = "OFF"
+    pingToggle.TextColor3 = Color3.fromRGB(180, 180, 180)
+    pingToggle.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+    updateLockVisual()
+    lockBtn.Text = "🔓 Unlocked"
+    lockBtn.TextColor3 = Color3.fromRGB(180, 180, 180)
+    lockBtn.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+    for _, swatch in ipairs(swatchColors) do
+        if swatch.name == "Red" then
+            for _, child in pairs(swatchRow:GetChildren()) do
+                if child:IsA("TextButton") then
+                    for _, c in pairs(child:GetChildren()) do
+                        if c:IsA("UIStroke") then c:Destroy() end
+                    end
+                    if child.BackgroundColor3 == swatch.color then
+                        selectedSwatch = child
+                        local stroke = Instance.new("UIStroke", child)
+                        stroke.Color = Color3.fromRGB(255, 255, 255)
+                        stroke.Thickness = 2
+                    end
+                end
+            end
+        end
+    end
+    saveConfig()
+    resetConfigBtn.Text = "✓ Reset"
+    resetConfigBtn.BackgroundColor3 = Color3.fromRGB(220, 60, 60)
+    task.delay(1.5, function()
+        resetConfigBtn.Text = "↺ Reset"
+        resetConfigBtn.BackgroundColor3 = Color3.fromRGB(190, 50, 50)
+    end)
+end)
+
 toggleBtn.MouseButton1Click:Connect(function()
     ScriptEnabled              = not ScriptEnabled
     toggleBtn.Text             = ScriptEnabled and "ENABLED" or "DISABLED"
@@ -827,6 +1114,7 @@ pingToggle.MouseButton1Click:Connect(function()
         pingToggle.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
         destroyGhost()
     end
+    saveConfig()
 end)
 
 lockBtn.MouseButton1Click:Connect(function()
@@ -841,6 +1129,7 @@ lockBtn.MouseButton1Click:Connect(function()
         lockBtn.TextColor3       = Color3.fromRGB(180, 180, 180)
         lockBtn.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
     end
+    saveConfig()
 end)
 
 tutBtn.MouseButton1Click:Connect(function()
@@ -867,31 +1156,76 @@ local function getHRP(character)
     )
 end
 
-local function getNearestPlayer(maxRange)
+-- Modified: now also detects non-player characters (NPCs) in workspace.Character or workspace
+local function getNearestTarget(maxRange, exclude)
     local myHRP = getHRP(LocalPlayer.Character)
     if not myHRP then return nil end
     local nearest, nearestDist = nil, maxRange
-    for _, pl in pairs(Players:GetPlayers()) do
-        if pl ~= LocalPlayer and pl.Character
-        and pl.Character:FindFirstChild("Humanoid")
-        and pl.Character.Humanoid.Health > 0 then
-            local tHRP = getHRP(pl.Character)
-            if tHRP then
-                local dist = (myHRP.Position - tHRP.Position).Magnitude
-                if dist < nearestDist then
-                    nearestDist = dist
-                    nearest     = pl
+
+    local function considerCharacter(charModel, ownerPlayer)
+        if charModel == LocalPlayer.Character then return end
+        if exclude then
+            if ownerPlayer and exclude == ownerPlayer then return end
+            if not ownerPlayer and exclude.Character and exclude.Character == charModel then return end
+            if not ownerPlayer and typeof(exclude) == "Instance" and exclude == charModel then return end
+        end
+        local hum = charModel:FindFirstChildOfClass("Humanoid")
+        local hrp = getHRP(charModel)
+        if hum and hum.Health > 0 and hrp then
+            local dist = (myHRP.Position - hrp.Position).Magnitude
+            if dist < nearestDist then
+                nearestDist = dist
+                if ownerPlayer then
+                    nearest = ownerPlayer
+                else
+                    nearest = {Character = charModel}  -- wrapper for NPC
                 end
             end
         end
     end
+
+    -- Player characters
+    for _, pl in pairs(Players:GetPlayers()) do
+        if pl ~= LocalPlayer then
+            local char = pl.Character
+            if char then considerCharacter(char, pl) end
+        end
+    end
+
+    -- Non-player characters: first check workspace.Character folder, else scan workspace
+    local charFolder = workspace:FindFirstChild("Character")
+    local modelsToCheck = {}
+    if charFolder then
+        for _, obj in ipairs(charFolder:GetChildren()) do
+            if obj:IsA("Model") then table.insert(modelsToCheck, obj) end
+        end
+    else
+        for _, obj in ipairs(workspace:GetDescendants()) do
+            if obj:IsA("Model") and obj:FindFirstChildOfClass("Humanoid") and not Players:GetPlayerFromCharacter(obj) then
+                if not table.find(modelsToCheck, obj) then
+                    table.insert(modelsToCheck, obj)
+                end
+            end
+        end
+    end
+    for _, charModel in ipairs(modelsToCheck) do
+        considerCharacter(charModel, nil)
+    end
+
     return nearest
 end
 
-local function isEnemyRagdolled(targetPlayer)
-    if not targetPlayer or not targetPlayer.Character then return false end
-    local hum = targetPlayer.Character:FindFirstChildOfClass("Humanoid")
-    local hrp = getHRP(targetPlayer.Character)
+-- Modified: works with both Player objects and character models directly
+local function isEnemyRagdolled(target)
+    local char
+    if target and target.Character then
+        char = target.Character  -- player or NPC wrapper
+    else
+        char = target            -- assume it's a character model
+    end
+    if not char then return false end
+    local hum = char:FindFirstChildOfClass("Humanoid")
+    local hrp = getHRP(char)
     if hum and hrp then
         return hum:GetState() == Enum.HumanoidStateType.Physics
             or math.abs(hrp.CFrame.UpVector.Y) < 0.7
@@ -913,84 +1247,170 @@ local function getActiveAnimId()
 end
 
 function startCurveGlide()
-    if not ScriptEnabled then return end
-    local target = getNearestPlayer(Settings.Range)
+    if not ScriptEnabled or glideInProgress then return end
+    glideInProgress = true
+
+    local target = getNearestTarget(Settings.Range)
     local myChar = LocalPlayer.Character
     local myHRP  = getHRP(myChar)
     local hum    = myChar and myChar:FindFirstChildOfClass("Humanoid")
-    if not (target and myHRP and hum) then return end
-    if isEnemyRagdolled(target) then return end
+    if not (target and myHRP and hum) then glideInProgress = false return end
+    if isEnemyRagdolled(target) then glideInProgress = false return end
 
-    local tHRP = getHRP(target.Character)
-    if not tHRP or not tHRP.Parent then return end
+    -- Extract the target character (works for Player, NPC wrapper, or direct model)
+    local targetChar
+    if target.Character then
+        targetChar = target.Character
+    elseif typeof(target) == "Instance" then
+        targetChar = target
+    else
+        glideInProgress = false
+        return
+    end
+
+    local tHRP = getHRP(targetChar)
+    if not tHRP or not tHRP.Parent then glideInProgress = false return end
 
     local startTime = tick()
     local startPos  = Vector3.new(myHRP.Position.X, 0, myHRP.Position.Z)
 
+    local initialTargetCF = tHRP.CFrame
+    local initialLookFlat = Vector3.new(initialTargetCF.LookVector.X, 0, initialTargetCF.LookVector.Z).Unit
+    local initialRightVec = Vector3.new(initialTargetCF.RightVector.X, 0, initialTargetCF.RightVector.Z).Unit
+    local toPlayer = startPos - Vector3.new(tHRP.Position.X, 0, tHRP.Position.Z)
+    local lockedSideSign = toPlayer:Dot(initialRightVec) >= 0 and 1 or -1
+
     local function getBehindPos()
-        local lookFlat = Vector3.new(
-            tHRP.CFrame.LookVector.X, 0, tHRP.CFrame.LookVector.Z
-        ).Unit
-        return Vector3.new(tHRP.Position.X, 0, tHRP.Position.Z) - lookFlat * Settings.Radius
+        if not (tHRP and tHRP.Parent) then return nil end
+        return Vector3.new(tHRP.Position.X, 0, tHRP.Position.Z) - initialLookFlat * Settings.Radius
     end
 
     local function getSideControlPoint()
-        local rightVec = Vector3.new(
-            tHRP.CFrame.RightVector.X, 0, tHRP.CFrame.RightVector.Z
-        ).Unit
-        local toPlayer    = Vector3.new(myHRP.Position.X, 0, myHRP.Position.Z)
-                          - Vector3.new(tHRP.Position.X,  0, tHRP.Position.Z)
-        local sideSign    = toPlayer:Dot(rightVec) >= 0 and 1 or -1
-        local initEnd     = getBehindPos()
-        local flatDist    = (initEnd - startPos).Magnitude
-        local scaledCurve = math.clamp(flatDist * 0.6, 4, Settings.CurveStrength)
-        return Vector3.new(tHRP.Position.X, 0, tHRP.Position.Z)
-             + rightVec * (scaledCurve * sideSign)
+        if not (tHRP and tHRP.Parent) then return nil end
+        return Vector3.new(tHRP.Position.X, 0, tHRP.Position.Z) + initialRightVec * (Settings.CurveStrength * lockedSideSign)
     end
 
-    local controlPt       = getSideControlPoint()
     hum.AutoRotate        = false
     local prevCam         = Camera.CameraType
     Camera.CameraType     = Enum.CameraType.Custom
+
+    local MAX_DEST_SPEED = 18
+    local smoothedEnd    = getBehindPos()
+    local lastHeartbeat  = tick()
 
     local conn
     conn = RunService.Heartbeat:Connect(function()
         if not ScriptEnabled then
             conn:Disconnect()
-            hum.AutoRotate    = true
+            if hum then hum.AutoRotate = true end
             Camera.CameraType = prevCam
+            glideInProgress = false
             return
         end
 
-        local alpha = math.clamp((tick() - startTime) / Settings.Duration, 0, 1)
+        myHRP = getHRP(LocalPlayer.Character)
+        if not (myHRP and myHRP.Parent and hum and hum.Health > 0) then
+            conn:Disconnect()
+            if hum then hum.AutoRotate = true end
+            Camera.CameraType = prevCam
+            glideInProgress = false
+            return
+        end
 
-        if alpha >= 1 or not tHRP.Parent then
+        -- Check if current target is still valid, else find a new one
+        local currentTargetChar = target.Character or (typeof(target) == "Instance" and target)
+        if not currentTargetChar or not currentTargetChar:FindFirstChildOfClass("Humanoid")
+            or currentTargetChar.Humanoid.Health <= 0 then
+            local newTarget = getNearestTarget(Settings.Range, target)
+            if newTarget then
+                target = newTarget
+                if target.Character then
+                    currentTargetChar = target.Character
+                elseif typeof(target) == "Instance" then
+                    currentTargetChar = target
+                end
+                if currentTargetChar then
+                    tHRP = getHRP(currentTargetChar)
+                    if tHRP then
+                        initialTargetCF = tHRP.CFrame
+                        initialLookFlat = Vector3.new(initialTargetCF.LookVector.X, 0, initialTargetCF.LookVector.Z).Unit
+                        initialRightVec = Vector3.new(initialTargetCF.RightVector.X, 0, initialTargetCF.RightVector.Z).Unit
+                        local currentPos = Vector3.new(myHRP.Position.X, 0, myHRP.Position.Z)
+                        local targetPos = Vector3.new(tHRP.Position.X, 0, tHRP.Position.Z)
+                        local toPlayerNow = currentPos - targetPos
+                        lockedSideSign = toPlayerNow:Dot(initialRightVec) >= 0 and 1 or -1
+                    end
+                end
+            end
+        end
+
+        if not (tHRP and tHRP.Parent) then
+            conn:Disconnect()
+            hum.AutoRotate = true
+            Camera.CameraType = prevCam
+            glideInProgress = false
+            return
+        end
+
+        local now   = tick()
+        local dt    = now - lastHeartbeat
+        lastHeartbeat = now
+
+        local alpha = math.clamp((now - startTime) / Settings.Duration, 0, 1)
+
+        if alpha >= 1 then
             conn:Disconnect()
             hum.AutoRotate    = true
             Camera.CameraType = prevCam
-            if tHRP and tHRP.Parent then
-                local finalBehind = getBehindPos()
+            local finalPos = getBehindPos()
+            if finalPos then
                 myHRP.CFrame = CFrame.new(
-                    Vector3.new(finalBehind.X, myHRP.Position.Y, finalBehind.Z),
+                    Vector3.new(finalPos.X, myHRP.Position.Y, finalPos.Z),
                     Vector3.new(tHRP.Position.X, myHRP.Position.Y, tHRP.Position.Z)
                 )
             end
+            glideInProgress = false
             return
         end
 
-        local liveEndPos     = getBehindPos()
+        local rawEnd  = getBehindPos()
+        if not rawEnd then
+            conn:Disconnect()
+            hum.AutoRotate = true
+            Camera.CameraType = prevCam
+            glideInProgress = false
+            return
+        end
+
+        local delta   = rawEnd - smoothedEnd
+        local maxStep = MAX_DEST_SPEED * dt
+        if delta.Magnitude > maxStep then
+            smoothedEnd = smoothedEnd + delta.Unit * maxStep
+        else
+            smoothedEnd = rawEnd
+        end
+
+        local controlPos = getSideControlPoint()
+        if not controlPos then
+            conn:Disconnect()
+            hum.AutoRotate = true
+            Camera.CameraType = prevCam
+            glideInProgress = false
+            return
+        end
+
         local blendedControl = Vector3.new(
-            controlPt.X * (1 - alpha) + liveEndPos.X * alpha,
+            controlPos.X * (1 - alpha) + smoothedEnd.X * alpha,
             0,
-            controlPt.Z * (1 - alpha) + liveEndPos.Z * alpha
+            controlPos.Z * (1 - alpha) + smoothedEnd.Z * alpha
         )
 
         local t  = 1 - (1 - alpha)^2
         local t1 = 1 - t
         local movePos = Vector3.new(
-            (t1*t1)*startPos.X + (2*t1*t)*blendedControl.X + (t*t)*liveEndPos.X,
+            (t1*t1)*startPos.X + (2*t1*t)*blendedControl.X + (t*t)*smoothedEnd.X,
             myHRP.Position.Y,
-            (t1*t1)*startPos.Z + (2*t1*t)*blendedControl.Z + (t*t)*liveEndPos.Z
+            (t1*t1)*startPos.Z + (2*t1*t)*blendedControl.Z + (t*t)*smoothedEnd.Z
         )
 
         myHRP.CFrame  = CFrame.new(
@@ -1005,7 +1425,7 @@ function startCurveGlide()
 end
 
 dashBtn.MouseButton1Click:Connect(function()
-    if not ScriptEnabled then return end
+    if not ScriptEnabled or glideInProgress then return end
     fireActivated()
     task.wait(0.2)
     startCurveGlide()
@@ -1015,6 +1435,10 @@ local function setupCharacter(character)
     local humanoid = character:WaitForChild("Humanoid", 5)
     local animator = humanoid and humanoid:WaitForChild("Animator", 5)
     if not animator then return end
+
+    local ANIM_GLIDE_COOLDOWN = 0.6
+    local lastAnimGlide       = 0
+
     animator.AnimationPlayed:Connect(function(track)
         if not ScriptEnabled then return end
         local animId    = track.Animation.AnimationId
@@ -1022,9 +1446,11 @@ local function setupCharacter(character)
         if not delayTime and StraightAnimations[animId] then delayTime = 0.19 end
         if delayTime then
             task.delay(delayTime, function()
-                if humanoid.Health > 0 and ScriptEnabled then
-                    fireActivated()
-                end
+                if not (humanoid.Health > 0 and ScriptEnabled) then return end
+                local now = tick()
+                if now - lastAnimGlide < ANIM_GLIDE_COOLDOWN then return end
+                lastAnimGlide = now
+                fireActivated()
             end)
         end
     end)
@@ -1051,9 +1477,24 @@ end)
 
 UserInputService.InputBegan:Connect(function(input, processed)
     if processed then return end
-    if ScriptEnabled and input.KeyCode == Enum.KeyCode.E then
+    if ScriptEnabled and input.KeyCode == Enum.KeyCode.E and not glideInProgress then
         fireActivated()
         task.wait(0.2)
         startCurveGlide()
     end
 end)
+
+loadConfig()
+updateSlidersFromSettings()
+if pingVisualizerEnabled then
+    pingToggle.Text = "ON"
+    pingToggle.TextColor3 = Color3.fromRGB(255, 255, 255)
+    pingToggle.BackgroundColor3 = Color3.fromRGB(0, 180, 90)
+    createGhost(LocalPlayer.Character)
+end
+updateLockVisual()
+if mobileBtnLocked then
+    lockBtn.Text = "🔒 Locked"
+    lockBtn.TextColor3 = Color3.fromRGB(255, 200, 50)
+    lockBtn.BackgroundColor3 = Color3.fromRGB(60, 50, 20)
+end
